@@ -380,8 +380,8 @@ function PitchSVG({ negro, blanco, fecha }) {
   const bL = layoutTeam(blanco);
 
   // Coordenadas Y: negro arriba (1-48%), blanco abajo (52-99%)
-  const yN = { arq: H*0.07, def: H*0.22, med: H*0.35, del: H*0.46 };
-  const yB = { arq: H*0.93, def: H*0.78, med: H*0.65, del: H*0.54 };
+  const yN = { arq: H*0.06, def: H*0.19, med: H*0.31, del: H*0.43 };
+  const yB = { arq: H*0.94, def: H*0.81, med: H*0.69, del: H*0.57 };
 
   const Shirt = ({x, y, name, isGoalie, team}) => {
     const isNegro = team==="negro";
