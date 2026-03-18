@@ -101,18 +101,18 @@ function buildTwoOptions(selectedIds, players) {
     if (arqueros.length>=2) {
       negro.push({...arqueros[0],role:"Arquero"});
       blanco.push({...arqueros[1],role:"Arquero"});
-      const rem = shuffle([...arqueros.slice(2),...rest]);
-      rem.forEach((p,i) => i<(6-negro.length) ? negro.push({...p,role:"Jugador"}) : blanco.push({...p,role:"Jugador"}));
+      const rem = shuffle([...arqueros.slice(2).map(p=>({...p,role:"Jugador"})), ...rest.map(p=>({...p,role:"Jugador"}))]);
+      rem.forEach(p => negro.length<6 ? negro.push(p) : blanco.push(p));
     } else if (arqueros.length===1) {
       negro.push({...arqueros[0],role:"Arquero"});
-      const rem=shuffle(rest);
+      const rem = shuffle(rest.map(p=>({...p,role:"Jugador"})));
       blanco.push({...rem[0],role:"Arquero (imp.)"});
-      rem.slice(1).forEach((p,i) => negro.length<6 ? negro.push({...p,role:"Jugador"}) : blanco.push({...p,role:"Jugador"}));
+      rem.slice(1).forEach(p => negro.length<6 ? negro.push(p) : blanco.push(p));
     } else {
-      const rem=shuffle(rest);
+      const rem = shuffle(rest.map(p=>({...p,role:"Jugador"})));
       negro.push({...rem[0],role:"Arquero (imp.)"});
       blanco.push({...rem[1],role:"Arquero (imp.)"});
-      rem.slice(2).forEach((p,i) => negro.length<6 ? negro.push({...p,role:"Jugador"}) : blanco.push({...p,role:"Jugador"}));
+      rem.slice(2).forEach(p => negro.length<6 ? negro.push(p) : blanco.push(p));
     }
     return { negro:negro.slice(0,6), blanco:blanco.slice(0,6) };
   };
@@ -332,9 +332,15 @@ const CSS = `
 
 // ─── PITCH SVG ────────────────────────────────────────────────────────────────
 function assignPositions(team) {
+  if (!team || team.length < 6) return { arquero:{name:"?"}, defensores:[{name:"?"},{name:"?"}], medio:{name:"?"}, delanteros:[{name:"?"},{name:"?"}] };
   const arquero = team.find(p => p.role && p.role.includes("Arquero")) || team[0];
   const rest = team.filter(p => p !== arquero);
-  return { arquero, defensores:[rest[0],rest[1]], medio:rest[2], delanteros:[rest[3],rest[4]] };
+  return {
+    arquero: arquero || {name:"?"},
+    defensores: [rest[0]||{name:"?"}, rest[1]||{name:"?"}],
+    medio: rest[2]||{name:"?"},
+    delanteros: [rest[3]||{name:"?"}, rest[4]||{name:"?"}]
+  };
 }
 
 function PitchSVG({ negro, blanco, fecha }) {
