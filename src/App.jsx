@@ -103,39 +103,48 @@ function buildTwoOptions(selectedIds, players, stats) {
   const selected = players.filter(p => selectedIds.includes(p.id));
   if (selected.length < 12) return null;
 
-  // Ordenar por ranking (pts desc) para intercalar en equipos
-  const ranked = [...selected].sort((a,b) => pts(stats[b.id]||{}) - pts(stats[a.id]||{}));
+  // Separar arqueros del resto
+  const arqueros = selected.filter(p => p.positions[0] === "Arquero");
+  const noArqueros = selected.filter(p => p.positions[0] !== "Arquero");
+
+  // Ordenar no-arqueros por ranking (pts desc)
+  const ranked = [...noArqueros].sort((a,b) => pts(stats[b.id]||{}) - pts(stats[a.id]||{}));
 
   const makeBalancedTeams = () => {
-    // Intercalar: 1°→negro, 2°→blanco, 3°→blanco, 4°→negro, 5°→negro, 6°→blanco...
-    // Patrón snake draft para balancear por ranking
     let negro = [], blanco = [];
-    const order = [0,1,1,0,0,1,1,0,0,1,1,0]; // 0=negro, 1=blanco para 12 jugadores
-    const shuffledRanked = [...ranked];
+
+    // 1) Asignar UN arquero a cada equipo (shuffleados para variación)
+    const shuffledArqs = shuffle(arqueros);
+    const arqNegro = shuffledArqs[0];
+    const arqBlanco = shuffledArqs[1];
+    // Si hay más de 2 arqueros, agregarlos como jugadores de campo con su posición secundaria
+    const extraArqs = shuffledArqs.slice(2).map(p => ({
+      ...p,
+      role: p.positions[1] || "Defensor"
+    }));
+
+    negro.push({ ...arqNegro, role: "Arquero" });
+    blanco.push({ ...arqBlanco, role: "Arquero" });
+
+    // 2) Snake draft con los no-arqueros (+ arqueros extra si hubiera)
+    const pool = [...ranked, ...extraArqs];
     // Pequeño shuffle dentro de grupos de 2 para variación
-    for(let i=0;i<shuffledRanked.length;i+=2){
-      if(Math.random()<0.4){ const t=shuffledRanked[i]; shuffledRanked[i]=shuffledRanked[i+1]||t; shuffledRanked[i+1]=t; }
-    }
-
-    shuffledRanked.forEach((p,i) => {
-      const team = order[i]===0 ? negro : blanco;
-      // Determinar role según posición primaria
-      const arqCount = team.filter(x=>x.role==="Arquero").length;
-      let role = p.positions[0] || "Jugador";
-      if (role === "Arquero" && arqCount >= 1) {
-        role = p.positions[1] || "Jugador";
+    const shuffledPool = [...pool];
+    for(let i=0;i<shuffledPool.length;i+=2){
+      if(Math.random()<0.4 && shuffledPool[i+1]){
+        const t=shuffledPool[i]; shuffledPool[i]=shuffledPool[i+1]; shuffledPool[i+1]=t;
       }
-      team.push({...p, role});
-    });
-
-    // Garantizar 1 arquero por equipo: si algún equipo no tiene, buscar y asignar
-    [negro, blanco].forEach(team => {
-      const hasArq = team.some(p=>p.role==="Arquero");
-      if (!hasArq) {
-        // Buscar el primer jugador con Arquero en sus posiciones
-        const idx = team.findIndex(p=>p.positions.includes("Arquero"));
-        if (idx>=0) team[idx] = {...team[idx], role:"Arquero"};
-        else team[0] = {...team[0], role:"Arquero (imp.)"};
+    }
+    const order = [0,1,1,0,0,1,1,0,0,1,1,0]; // 0=negro, 1=blanco
+    shuffledPool.forEach((p, i) => {
+      if (negro.length + blanco.length >= 12) return;
+      const role = p.role || p.positions[0] || "Jugador";
+      if (order[i % order.length] === 0 && negro.length < 6) {
+        negro.push({ ...p, role });
+      } else if (blanco.length < 6) {
+        blanco.push({ ...p, role });
+      } else {
+        negro.push({ ...p, role });
       }
     });
 
@@ -218,7 +227,7 @@ const CSS = `
   .team-section-label { font-size:9px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:var(--muted); margin-bottom:4px; }
   .team-player-chip { background:rgba(255,255,255,0.05); border-radius:5px; padding:4px 8px; font-size:12px; font-weight:600; color:rgba(255,255,255,0.8); display:inline-flex; align-items:center; gap:4px; margin:2px; cursor:pointer; transition:all 0.15s; }
   .team-player-chip:hover { background:rgba(255,255,255,0.12); }
-  .team-player-chip.arq { color:var(--yellow); }
+  .team-player-chip.arq { color:var(--yellow); background:rgba(255,215,64,0.1); border:1px solid rgba(255,215,64,0.25); }
   .team-player-chip.selected-swap { background:var(--azul); color:#fff; outline:2px solid var(--azul-light); }
   .options-row { display:flex; gap:10px; margin-bottom:12px; }
   .chosen-badge { position:absolute; top:8px; right:8px; background:var(--green); color:#000; border-radius:4px; font-size:10px; font-weight:800; padding:2px 6px; letter-spacing:1px; font-family:'Barlow Condensed',sans-serif; }
@@ -339,7 +348,7 @@ const CSS = `
 `;
 
 // ─── PITCH SVG MEJORADO ───────────────────────────────────────────────────────
-function PitchSVG({ negro, blanco, fecha }) {
+function PitchSVG({ negro, blanco, fecha, isAdmin }) {
   const W = 360, H = 560;
   const svgRef = useRef(null);
 
@@ -360,57 +369,77 @@ function PitchSVG({ negro, blanco, fecha }) {
     img.src = url;
   };
 
-  // Asignar posiciones en la cancha para cada equipo (1 arq, 2 def, 1 medio, 2 del)
+  // Asignar posiciones en la cancha respetando el rol del sorteo
   const layoutTeam = (team) => {
-    const arq   = team.find(p => p.role && p.role.includes("Arquero")) || team[0];
-    const rest  = team.filter(p => p !== arq);
-    // Intentar asignar por posición primaria
-    const defs  = rest.filter(p => p.positions[0]==="Defensor").slice(0,2);
-    const meds  = rest.filter(p => p.positions[0]==="Mediocampista" && !defs.includes(p)).slice(0,1);
-    const dels  = rest.filter(p => !defs.includes(p) && !meds.includes(p));
-    // Rellenar si faltan
-    const remaining = rest.filter(p=>!defs.includes(p)&&!meds.includes(p)&&!dels.includes(p));
-    while(defs.length<2 && remaining.length) defs.push(remaining.shift());
-    while(meds.length<1 && remaining.length) meds.push(remaining.shift());
-    while(dels.length<2 && remaining.length) dels.push(remaining.shift());
-    return { arq, defs:defs.slice(0,2), med:meds[0]||dels[0]||rest[2], dels:dels.slice(0,2) };
+    // 1) El arquero es siempre el que tiene role="Arquero" (garantizado por buildTwoOptions)
+    const arq = team.find(p => p.role === "Arquero") || team[0];
+    const rest = team.filter(p => p !== arq);
+
+    // 2) Para cada jugador del resto, usar su role asignado en el sorteo
+    //    El role puede ser: Defensor, Mediocampista, Delantero (o posición primaria)
+    const getRoleCategory = (p) => {
+      const r = p.role || p.positions[0] || "Delantero";
+      if (r === "Defensor") return "def";
+      if (r === "Mediocampista") return "med";
+      return "del";
+    };
+
+    let defs = rest.filter(p => getRoleCategory(p) === "def");
+    let meds = rest.filter(p => getRoleCategory(p) === "med");
+    let dels = rest.filter(p => getRoleCategory(p) === "del");
+
+    // 3) Rellenar slots si alguna línea tiene 0 (sin cambiar arquero)
+    //    Prioridad: asegurar al menos 1 def, 1 del; med es opcional
+    const pool = [...rest];
+    const used = new Set([...defs, ...meds, ...dels].map(p=>p.id));
+
+    if (defs.length === 0 && pool.length > 0) {
+      const p = pool.find(x => !used.has(x.id));
+      if (p) { defs.push(p); used.add(p.id); }
+    }
+    if (dels.length === 0 && pool.length > 0) {
+      const p = pool.find(x => !used.has(x.id));
+      if (p) { dels.push(p); used.add(p.id); }
+    }
+    // Cualquier sobrante va a delanteros
+    rest.forEach(p => { if (!used.has(p.id)) { dels.push(p); used.add(p.id); } });
+
+    // 4) Distribuir en la cancha: máx 3 defs, 1 med, resto dels
+    const finalDefs = defs.slice(0,3);
+    const finalMed  = meds[0] || null;
+    const finalDels = [...dels, ...defs.slice(3), ...(finalMed ? [] : meds.slice(1))];
+
+    return { arq, defs: finalDefs, med: finalMed, dels: finalDels };
   };
 
   const nL = layoutTeam(negro);
   const bL = layoutTeam(blanco);
 
-  // Coordenadas Y: negro arriba (1-48%), blanco abajo (52-99%)
-  const yN = { arq: H*0.06, def: H*0.19, med: H*0.31, del: H*0.43 };
-  const yB = { arq: H*0.94, def: H*0.81, med: H*0.69, del: H*0.57 };
-
-  const Shirt = ({x, y, name, isGoalie, team}) => {
-    const isNegro = team==="negro";
-    const shirtFill  = isGoalie ? (isNegro?"#d4820a":"#1a9b5f") : (isNegro?"#1a1a1a":"#f0f0f0");
-    const shirtStroke= isGoalie ? (isNegro?"#b06a00":"#0f7a45") : (isNegro?"#444":"#bbb");
-    const textFill   = isNegro ? "#fff" : "#111";
-    const badgeFill  = isGoalie ? (isNegro?"#b06a00":"#0f7a45") : (isNegro?"#333":"#ddd");
-    const S = 20; // escala de la camiseta
-    return (
-      <g transform={`translate(${x},${y})`}>
-        {/* Camiseta */}
-        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.1},${-S*0.45} L${-S*0.55},${-S*0.2} L${-S*0.55},${S*0.85} L${S*0.55},${S*0.85} L${S*0.55},${-S*0.2} L${S*1.1},${-S*0.45} L${S*0.75},${-S*0.95} Z`}
-          fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        {/* Mangas */}
-        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.2},${-S*0.55} L${-S*1.1},${-S*0.45} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        <path d={`M${S*0.75},${-S*0.95} L${S*1.2},${-S*0.55} L${S*1.1},${-S*0.45} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        {/* Cuello */}
-        <path d={`M${-S*0.35},${-S*0.95} Q0,${-S*0.7} ${S*0.35},${-S*0.95}`} fill="none" stroke={shirtStroke} strokeWidth="2"/>
-        {/* Número/badge */}
-        <circle cx="0" cy={S*0.1} r={S*0.28} fill={badgeFill} opacity="0.7"/>
-        {/* Nombre debajo */}
-        <text x="0" y={S*1.35} textAnchor="middle" fontSize="11" fontWeight="900"
-          fill="white" fontFamily="'Barlow Condensed',Arial,sans-serif"
-          style={{textShadow:"0 1px 3px rgba(0,0,0,0.9)"}}>
-          {(name||"?").toUpperCase()}
-        </text>
-      </g>
-    );
+  // Estado edición de nombres
+  const [editMode, setEditMode] = useState(false);
+  const [names, setNames] = useState(() => {
+    const obj = {};
+    negro.forEach(p  => { obj[`n_${p.id}`] = p.name; });
+    blanco.forEach(p => { obj[`b_${p.id}`] = p.name; });
+    return obj;
+  });
+  const [editingKey, setEditingKey] = useState(null);
+  const [editVal, setEditVal]       = useState("");
+  const getName = (p, prefix) => names[`${prefix}_${p.id}`] ?? p.name;
+  const startEdit = (key, val) => { setEditingKey(key); setEditVal(val); };
+  const confirmEdit = () => {
+    if (editingKey) setNames(n => ({...n, [editingKey]: editVal.trim() || editVal}));
+    setEditingKey(null);
   };
+
+  // Coordenadas Y dinámicas según si hay mediocampista
+  const hasNMed = !!nL.med, hasBMed = !!bL.med;
+  const yN = hasNMed
+    ? { arq: H*0.06, def: H*0.18, med: H*0.30, del: H*0.42 }
+    : { arq: H*0.06, def: H*0.20, med: null,    del: H*0.36 };
+  const yB = hasBMed
+    ? { arq: H*0.94, def: H*0.82, med: H*0.70, del: H*0.58 }
+    : { arq: H*0.94, def: H*0.80, med: null,    del: H*0.64 };
 
   const rowX = (count) => {
     if (count === 1) return [W/2];
@@ -419,69 +448,134 @@ function PitchSVG({ negro, blanco, fecha }) {
     return [W*0.15, W*0.38, W*0.62, W*0.85];
   };
 
+  const Shirt = ({x, y, name, isGoalie, team}) => {
+    const isNegro = team==="negro";
+    // Arquero SIEMPRE amarillo (ambos equipos)
+    const shirtFill   = isGoalie ? "#f5c518"  : (isNegro?"#1a1a1a":"#f0f0f0");
+    const shirtStroke = isGoalie ? "#c9a000"  : (isNegro?"#444":"#bbb");
+    const badgeFill   = isGoalie ? "#c9a000"  : (isNegro?"#333":"#ddd");
+    const S = 20;
+    return (
+      <g transform={`translate(${x},${y})`}>
+        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.1},${-S*0.45} L${-S*0.55},${-S*0.2} L${-S*0.55},${S*0.85} L${S*0.55},${S*0.85} L${S*0.55},${-S*0.2} L${S*1.1},${-S*0.45} L${S*0.75},${-S*0.95} Z`}
+          fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.2},${-S*0.55} L${-S*1.1},${-S*0.45} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${S*0.75},${-S*0.95} L${S*1.2},${-S*0.55} L${S*1.1},${-S*0.45} Z`}   fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${-S*0.35},${-S*0.95} Q0,${-S*0.7} ${S*0.35},${-S*0.95}`} fill="none" stroke={shirtStroke} strokeWidth="2"/>
+        <circle cx="0" cy={S*0.1} r={S*0.28} fill={badgeFill} opacity="0.8"/>
+        <text x="0" y={S*1.38} textAnchor="middle" fontSize="11" fontWeight="900"
+          fill="white" fontFamily="'Barlow Condensed',Arial,sans-serif"
+          paintOrder="stroke" stroke="rgba(0,0,0,0.85)" strokeWidth="3" strokeLinejoin="round">
+          {(name||"?").toUpperCase()}
+        </text>
+      </g>
+    );
+  };
+
   return (
     <div className="pitch-wrapper">
+
+      {/* Botón toggle edición — solo admins */}
+      {isAdmin&&(<>
+        <button onClick={()=>{setEditMode(e=>!e);setEditingKey(null);}}
+          style={{width:"100%",padding:"8px",marginBottom:8,
+            background:editMode?"rgba(255,215,64,0.15)":"rgba(255,255,255,0.06)",
+            border:`1px solid ${editMode?"rgba(255,215,64,0.4)":"rgba(255,255,255,0.15)"}`,
+            borderRadius:8,color:editMode?"#ffd740":"#fff",
+            fontFamily:"Barlow Condensed,sans-serif",fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer"}}>
+          ✏️ {editMode?"Cerrar edición de nombres":"Editar nombres en la imagen"}
+        </button>
+
+        {/* Panel de edición */}
+        {editMode&&(
+          <div style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,215,64,0.2)",
+            borderRadius:10,padding:"12px",marginBottom:10}}>
+            <div style={{fontFamily:"Barlow Condensed,sans-serif",fontSize:12,
+              color:"rgba(255,215,64,0.8)",letterSpacing:1,marginBottom:10,
+              textTransform:"uppercase",fontWeight:700}}>Tocá un nombre para editarlo</div>
+            {["n","b"].map(prefix=>(
+              <div key={prefix} style={{marginBottom:10}}>
+                <div style={{fontSize:11,color:"var(--muted)",fontFamily:"Barlow Condensed,sans-serif",
+                  fontWeight:700,letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>
+                  {prefix==="n"?"⬛ Negro":"⬜ Blanco"}
+                </div>
+                <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+                  {(prefix==="n"?negro:blanco).map(p=>{
+                    const key=`${prefix}_${p.id}`;
+                    const isEditing=editingKey===key;
+                    return isEditing?(
+                      <div key={p.id} style={{display:"flex",gap:4,alignItems:"center"}}>
+                        <input autoFocus value={editVal}
+                          onChange={e=>setEditVal(e.target.value)}
+                          onKeyDown={e=>{if(e.key==="Enter")confirmEdit();if(e.key==="Escape")setEditingKey(null);}}
+                          style={{padding:"4px 8px",borderRadius:6,border:"1.5px solid var(--azul)",
+                            background:"var(--bg3)",color:"#fff",fontSize:13,
+                            fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,width:90,outline:"none"}}/>
+                        <button onClick={confirmEdit}
+                          style={{background:"var(--green)",color:"#000",border:"none",borderRadius:5,
+                            padding:"4px 8px",cursor:"pointer",fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✓</button>
+                        <button onClick={()=>setEditingKey(null)}
+                          style={{background:"var(--bg3)",color:"var(--muted)",border:"1px solid var(--border)",
+                            borderRadius:5,padding:"4px 8px",cursor:"pointer",
+                            fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✕</button>
+                      </div>
+                    ):(
+                      <button key={p.id} onClick={()=>startEdit(key,names[key]??p.name)}
+                        style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",
+                          background:"var(--bg3)",color:"#fff",cursor:"pointer",
+                          fontFamily:"Barlow Condensed,sans-serif",fontSize:13,fontWeight:700}}>
+                        {names[key]??p.name}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </>)}
+
       <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`}
         xmlns="http://www.w3.org/2000/svg"
         style={{display:"block", borderRadius:12, overflow:"hidden"}}>
 
-        {/* Fondo césped con franjas */}
+        {/* Césped */}
         {[...Array(12)].map((_,i)=>
           <rect key={i} x="0" y={i*(H/12)} width={W} height={H/12}
             fill={i%2===0?"#2e7d32":"#276428"}/>
         )}
-
-        {/* Líneas de campo */}
+        {/* Líneas */}
         <rect x="20" y="14" width={W-40} height={H-28} fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <line x1="20" y1={H/2} x2={W-20} y2={H/2} stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H/2} r="46" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H/2} r="3.5" fill="rgba(255,255,255,0.9)"/>
-
-        {/* Área grande arriba */}
+        {/* Áreas arriba */}
         <rect x={W/2-62} y="14" width="124" height="80" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
-        {/* Área chica arriba */}
-        <rect x={W/2-32} y="14" width="64" height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
-        {/* Punto penal arriba */}
+        <rect x={W/2-32} y="14" width="64"  height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy="66" r="3" fill="rgba(255,255,255,0.9)"/>
-        {/* Arco arriba */}
         <rect x={W/2-26} y="6" width="52" height="12" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.95)" strokeWidth="2"/>
-
-        {/* Área grande abajo */}
+        {/* Áreas abajo */}
         <rect x={W/2-62} y={H-94} width="124" height="80" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
-        {/* Área chica abajo */}
-        <rect x={W/2-32} y={H-48} width="64" height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
-        {/* Punto penal abajo */}
+        <rect x={W/2-32} y={H-48} width="64"  height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H-66} r="3" fill="rgba(255,255,255,0.9)"/>
-        {/* Arco abajo */}
         <rect x={W/2-26} y={H-18} width="52" height="12" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.95)" strokeWidth="2"/>
-
-        {/* Etiqueta NEGRO arriba */}
+        {/* Etiquetas */}
         <rect x="24" y="18" width="70" height="18" rx="3" fill="rgba(0,0,0,0.5)"/>
         <text x="59" y="31" textAnchor="middle" fontSize="11" fontWeight="900" fill="white" fontFamily="Barlow Condensed,sans-serif" letterSpacing="1">⬛ NEGRO</text>
-
-        {/* Etiqueta BLANCO abajo */}
         <rect x="24" y={H-36} width="76" height="18" rx="3" fill="rgba(0,0,0,0.5)"/>
         <text x="62" y={H-23} textAnchor="middle" fontSize="11" fontWeight="900" fill="white" fontFamily="Barlow Condensed,sans-serif" letterSpacing="1">⬜ BLANCO</text>
 
-        {/* ── EQUIPO NEGRO (arriba) ── */}
-        {/* Arquero */}
-        <Shirt x={W/2} y={yN.arq} name={nL.arq?.name} isGoalie={true} team="negro"/>
-        {/* Defensores */}
-        {nL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.defs.length)[i]} y={yN.def} name={p.name} isGoalie={false} team="negro"/>)}
-        {/* Mediocampista */}
-        {nL.med&&<Shirt x={W/2} y={yN.med} name={nL.med.name} isGoalie={false} team="negro"/>}
-        {/* Delanteros */}
-        {nL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.dels.length)[i]} y={yN.del} name={p.name} isGoalie={false} team="negro"/>)}
+        {/* ── NEGRO (arriba) ── */}
+        <Shirt x={W/2} y={yN.arq} name={getName(nL.arq,"n")} isGoalie={true} team="negro"/>
+        {nL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.defs.length)[i]} y={yN.def} name={getName(p,"n")} isGoalie={false} team="negro"/>)}
+        {nL.med&&<Shirt x={W/2} y={yN.med} name={getName(nL.med,"n")} isGoalie={false} team="negro"/>}
+        {nL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.dels.length)[i]} y={yN.del} name={getName(p,"n")} isGoalie={false} team="negro"/>)}
 
-        {/* ── EQUIPO BLANCO (abajo) ── */}
-        {/* Arquero */}
-        <Shirt x={W/2} y={yB.arq} name={bL.arq?.name} isGoalie={true} team="blanco"/>
-        {/* Defensores */}
-        {bL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.defs.length)[i]} y={yB.def} name={p.name} isGoalie={false} team="blanco"/>)}
-        {/* Mediocampista */}
-        {bL.med&&<Shirt x={W/2} y={yB.med} name={bL.med.name} isGoalie={false} team="blanco"/>}
-        {/* Delanteros */}
-        {bL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.dels.length)[i]} y={yB.del} name={p.name} isGoalie={false} team="blanco"/>)}
+        {/* ── BLANCO (abajo) ── */}
+        <Shirt x={W/2} y={yB.arq} name={getName(bL.arq,"b")} isGoalie={true} team="blanco"/>
+        {bL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.defs.length)[i]} y={yB.def} name={getName(p,"b")} isGoalie={false} team="blanco"/>)}
+        {bL.med&&<Shirt x={W/2} y={yB.med} name={getName(bL.med,"b")} isGoalie={false} team="blanco"/>}
+        {bL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.dels.length)[i]} y={yB.del} name={getName(p,"b")} isGoalie={false} team="blanco"/>)}
       </svg>
       <button className="pitch-download-btn" onClick={downloadPitch}>⬇️ Descargar imagen</button>
     </div>
@@ -958,7 +1052,7 @@ export default function App() {
                   return(<>
                     <div className="divider"/>
                     <div className="section-title" style={{fontSize:20}}>⚽ <span className="accent">Equipos del día</span></div>
-                    <PitchSVG negro={team.negro} blanco={team.blanco} fecha={nextFecha}/>
+                    <PitchSVG negro={team.negro} blanco={team.blanco} fecha={nextFecha} isAdmin={isAdmin}/>
                   </>);
                 })()}
 
