@@ -103,81 +103,51 @@ function buildTwoOptions(selectedIds, players, stats) {
   const selected = players.filter(p => selectedIds.includes(p.id));
   if (selected.length < 12) return null;
 
-  // Separar arqueros: primero los que tienen Arquero como posición primaria,
-  // luego los que lo tienen como secundaria (ej: Bruce)
+  // Detectar arqueros por cualquier posición (primaria o secundaria)
   const arquerosPrimary   = selected.filter(p => p.positions[0] === "Arquero");
   const arquerosSecondary = selected.filter(p => p.positions[0] !== "Arquero" && p.positions.includes("Arquero"));
-  const todosArqueros     = [...arquerosPrimary, ...arquerosSecondary];
-  const noArqueros        = selected.filter(p => !p.positions.includes("Arquero"));
+  let arqueros = [...arquerosPrimary, ...arquerosSecondary];
+  const campoPool = selected.filter(p => !arqueros.find(a=>a.id===p.id));
+  // Garantizar al menos 2 arqueros
+  while (arqueros.length < 2 && campoPool.length > 0) arqueros.push(campoPool.shift());
 
-  // Garantizar al menos 2 arqueros: si hay menos, tomar jugadores de campo como arquero
-  let arqueros = [...todosArqueros];
-  const campoPool = [...noArqueros];
-  while (arqueros.length < 2 && campoPool.length > 0) {
-    arqueros.push(campoPool.shift());
-  }
-
-  // Jugadores de campo restantes (no arqueros)
-  const campoIds = new Set(arqueros.map(p => p.id));
+  const campoIds = new Set(arqueros.map(p=>p.id));
   const campo = selected.filter(p => !campoIds.has(p.id));
-
-  // Ordenar campo por ranking (pts desc)
   const ranked = [...campo].sort((a,b) => pts(stats[b.id]||{}) - pts(stats[a.id]||{}));
 
   const makeBalancedTeams = () => {
     let negro = [], blanco = [];
-
-    // 1) Shuffle arqueros y asignar UNO a cada equipo — garantizado
     const shuffledArqs = shuffle(arqueros);
-    negro.push({ ...shuffledArqs[0], role: "Arquero" });
-    blanco.push({ ...shuffledArqs[1], role: "Arquero" });
-
-    // Si hay más de 2 arqueros, van al campo con posición secundaria
-    const extraArqs = shuffledArqs.slice(2).map(p => ({
-      ...p,
-      role: p.positions.find(pos => pos !== "Arquero") || "Defensor"
-    }));
-
-    // 2) Snake draft con jugadores de campo + arqueros extra
+    negro.push({ ...shuffledArqs[0], role:"Arquero" });
+    blanco.push({ ...shuffledArqs[1], role:"Arquero" });
+    const extraArqs = shuffledArqs.slice(2).map(p=>({...p, role:p.positions.find(pos=>pos!=="Arquero")||"Defensor"}));
     const pool = [...ranked, ...extraArqs];
     const shuffledPool = [...pool];
     for(let i=0;i<shuffledPool.length;i+=2){
-      if(Math.random()<0.4 && shuffledPool[i+1]){
-        const t=shuffledPool[i]; shuffledPool[i]=shuffledPool[i+1]; shuffledPool[i+1]=t;
-      }
+      if(Math.random()<0.4&&shuffledPool[i+1]){const t=shuffledPool[i];shuffledPool[i]=shuffledPool[i+1];shuffledPool[i+1]=t;}
     }
-    const order = [0,1,1,0,0,1,1,0,0,1,1,0]; // 0=negro, 1=blanco
-    shuffledPool.forEach((p, i) => {
-      if (negro.length + blanco.length >= 12) return;
-      const role = p.role || p.positions[0] || "Jugador";
-      if (order[i % order.length] === 0 && negro.length < 6) {
-        negro.push({ ...p, role });
-      } else if (blanco.length < 6) {
-        blanco.push({ ...p, role });
-      } else {
-        negro.push({ ...p, role });
-      }
+    const order=[0,1,1,0,0,1,1,0,0,1,1,0];
+    shuffledPool.forEach((p,i)=>{
+      if(negro.length+blanco.length>=12)return;
+      const role=p.role||p.positions[0]||"Jugador";
+      if(order[i%order.length]===0&&negro.length<6)negro.push({...p,role});
+      else if(blanco.length<6)blanco.push({...p,role});
+      else negro.push({...p,role});
     });
-
-    return { negro: negro.slice(0,6), blanco: blanco.slice(0,6) };
+    return { negro:negro.slice(0,6), blanco:blanco.slice(0,6) };
   };
 
   const arqsSeparados = (opt) => {
-    const arqsNegro  = opt.negro.filter(p => p.role === "Arquero").map(p => p.id);
-    const arqsBlanco = opt.blanco.filter(p => p.role === "Arquero").map(p => p.id);
-    // Verificar que no haya arqueros repetidos en el mismo equipo
-    return arqsNegro.length === 1 && arqsBlanco.length === 1 && arqsNegro[0] !== arqsBlanco[0];
+    const an = opt.negro.filter(p=>p.role==="Arquero").map(p=>p.id);
+    const ab = opt.blanco.filter(p=>p.role==="Arquero").map(p=>p.id);
+    return an.length===1 && ab.length===1 && an[0]!==ab[0];
   };
 
-  let opt1 = makeBalancedTeams(), att1 = 0;
-  while (!arqsSeparados(opt1) && att1++ < 20) opt1 = makeBalancedTeams();
+  let opt1=makeBalancedTeams(), a1=0;
+  while(!arqsSeparados(opt1)&&a1++<20) opt1=makeBalancedTeams();
 
-  let opt2 = makeBalancedTeams(), att2 = 0;
-  while (
-    (att2++ < 20) &&
-    (!arqsSeparados(opt2) ||
-     JSON.stringify(opt1.negro.map(p=>p.id).sort()) === JSON.stringify(opt2.negro.map(p=>p.id).sort()))
-  ) { opt2 = makeBalancedTeams(); }
+  let opt2=makeBalancedTeams(), a2=0;
+  while((a2++<20)&&(!arqsSeparados(opt2)||JSON.stringify(opt1.negro.map(p=>p.id).sort())===JSON.stringify(opt2.negro.map(p=>p.id).sort()))) opt2=makeBalancedTeams();
 
   return { azul:opt1, naranja:opt2 };
 }
@@ -370,10 +340,82 @@ const CSS = `
   .pitch-download-btn:hover { background:rgba(255,255,255,0.12); }
 `;
 
-// ─── PITCH SVG MEJORADO ───────────────────────────────────────────────────────
+
+// ─── PITCH SVG ───────────────────────────────────────────────────────────────
 function PitchSVG({ negro, blanco, fecha, isAdmin }) {
   const W = 360, H = 560;
   const svgRef = useRef(null);
+
+  // Layout fijo 1-2-1-2 basado en posiciones reales del jugador
+  const layoutTeam = (team) => {
+    const arq  = team.find(p => p.role === "Arquero") || team[0];
+    const rest = team.filter(p => p.id !== arq.id);
+    const score = (p) => {
+      const pos = p.positions[0];
+      if (pos === "Defensor")      return 0;
+      if (pos === "Mediocampista") return 1;
+      return 2;
+    };
+    const sorted = [...rest].sort((a,b) => score(a) - score(b));
+    return { arq, defs: sorted.slice(0,2), med: sorted[2]||null, dels: sorted.slice(3) };
+  };
+
+  // Posiciones iniciales en la cancha
+  const initPositions = () => {
+    const pos = {};
+    const nL = layoutTeam(negro);
+    const bL = layoutTeam(blanco);
+    const rx = (n) => n===1?[W/2]:n===2?[W*.28,W*.72]:n===3?[W*.18,W/2,W*.82]:[W*.15,W*.38,W*.62,W*.85];
+    pos[`n_${nL.arq.id}`] = { x:W/2, y:H*.06 };
+    nL.defs.forEach((p,i) => { pos[`n_${p.id}`] = { x:rx(2)[i], y:H*.19 }; });
+    if(nL.med) pos[`n_${nL.med.id}`] = { x:W/2, y:H*.31 };
+    nL.dels.forEach((p,i) => { pos[`n_${p.id}`] = { x:rx(nL.dels.length)[i], y:H*.43 }; });
+    pos[`b_${bL.arq.id}`] = { x:W/2, y:H*.94 };
+    bL.defs.forEach((p,i) => { pos[`b_${p.id}`] = { x:rx(2)[i], y:H*.81 }; });
+    if(bL.med) pos[`b_${bL.med.id}`] = { x:W/2, y:H*.69 };
+    bL.dels.forEach((p,i) => { pos[`b_${p.id}`] = { x:rx(bL.dels.length)[i], y:H*.57 }; });
+    return pos;
+  };
+
+  const [positions, setPositions] = useState(initPositions);
+  const [names, setNames] = useState(() => {
+    const obj = {};
+    negro.forEach(p  => { obj[`n_${p.id}`] = p.name; });
+    blanco.forEach(p => { obj[`b_${p.id}`] = p.name; });
+    return obj;
+  });
+  const [editMode,   setEditMode]   = useState(false);
+  const [editingKey, setEditingKey] = useState(null);
+  const [editVal,    setEditVal]    = useState("");
+  const [dragging,   setDragging]   = useState(null);
+
+  const getName = (key) => names[key] ?? key;
+  const confirmEdit = () => {
+    if (editingKey) setNames(n => ({...n, [editingKey]: editVal.trim() || editVal}));
+    setEditingKey(null);
+  };
+
+  // Drag handlers
+  const getSVGPoint = (clientX, clientY) => {
+    const svg = svgRef.current; if (!svg) return {x:0,y:0};
+    const rect = svg.getBoundingClientRect();
+    return { x:(clientX-rect.left)*(W/rect.width), y:(clientY-rect.top)*(H/rect.height) };
+  };
+  const onDragStart = (key, clientX, clientY) => {
+    if (!isAdmin) return;
+    const pt = getSVGPoint(clientX, clientY);
+    const cur = positions[key];
+    setDragging({ key, offX: pt.x-cur.x, offY: pt.y-cur.y });
+  };
+  const onDragMove = (clientX, clientY) => {
+    if (!dragging) return;
+    const pt = getSVGPoint(clientX, clientY);
+    setPositions(p => ({...p, [dragging.key]: {
+      x: Math.max(24, Math.min(W-24, pt.x-dragging.offX)),
+      y: Math.max(24, Math.min(H-24, pt.y-dragging.offY)),
+    }}));
+  };
+  const onDragEnd = () => setDragging(null);
 
   const downloadPitch = () => {
     const svg = svgRef.current; if (!svg) return;
@@ -392,161 +434,83 @@ function PitchSVG({ negro, blanco, fecha, isAdmin }) {
     img.src = url;
   };
 
-  // Asignar posiciones en la cancha respetando el rol del sorteo
-  const layoutTeam = (team) => {
-    // 1) El arquero es siempre el que tiene role="Arquero" (garantizado por buildTwoOptions)
-    const arq = team.find(p => p.role === "Arquero") || team[0];
-    const rest = team.filter(p => p !== arq);
-
-    // 2) Para cada jugador del resto, usar su role asignado en el sorteo
-    //    El role puede ser: Defensor, Mediocampista, Delantero (o posición primaria)
-    const getRoleCategory = (p) => {
-      const r = p.role || p.positions[0] || "Delantero";
-      if (r === "Defensor") return "def";
-      if (r === "Mediocampista") return "med";
-      return "del";
-    };
-
-    let defs = rest.filter(p => getRoleCategory(p) === "def");
-    let meds = rest.filter(p => getRoleCategory(p) === "med");
-    let dels = rest.filter(p => getRoleCategory(p) === "del");
-
-    // 3) Rellenar slots si alguna línea tiene 0 (sin cambiar arquero)
-    //    Prioridad: asegurar al menos 1 def, 1 del; med es opcional
-    const pool = [...rest];
-    const used = new Set([...defs, ...meds, ...dels].map(p=>p.id));
-
-    if (defs.length === 0 && pool.length > 0) {
-      const p = pool.find(x => !used.has(x.id));
-      if (p) { defs.push(p); used.add(p.id); }
-    }
-    if (dels.length === 0 && pool.length > 0) {
-      const p = pool.find(x => !used.has(x.id));
-      if (p) { dels.push(p); used.add(p.id); }
-    }
-    // Cualquier sobrante va a delanteros
-    rest.forEach(p => { if (!used.has(p.id)) { dels.push(p); used.add(p.id); } });
-
-    // 4) Distribuir en la cancha: máx 3 defs, 1 med, resto dels
-    const finalDefs = defs.slice(0,3);
-    const finalMed  = meds[0] || null;
-    const finalDels = [...dels, ...defs.slice(3), ...(finalMed ? [] : meds.slice(1))];
-
-    return { arq, defs: finalDefs, med: finalMed, dels: finalDels };
-  };
-
-  const nL = layoutTeam(negro);
-  const bL = layoutTeam(blanco);
-
-  // Estado edición de nombres
-  const [editMode, setEditMode] = useState(false);
-  const [names, setNames] = useState(() => {
-    const obj = {};
-    negro.forEach(p  => { obj[`n_${p.id}`] = p.name; });
-    blanco.forEach(p => { obj[`b_${p.id}`] = p.name; });
-    return obj;
-  });
-  const [editingKey, setEditingKey] = useState(null);
-  const [editVal, setEditVal]       = useState("");
-  const getName = (p, prefix) => names[`${prefix}_${p.id}`] ?? p.name;
-  const startEdit = (key, val) => { setEditingKey(key); setEditVal(val); };
-  const confirmEdit = () => {
-    if (editingKey) setNames(n => ({...n, [editingKey]: editVal.trim() || editVal}));
-    setEditingKey(null);
-  };
-
-  // Coordenadas Y dinámicas según si hay mediocampista
-  const hasNMed = !!nL.med, hasBMed = !!bL.med;
-  const yN = hasNMed
-    ? { arq: H*0.06, def: H*0.18, med: H*0.30, del: H*0.42 }
-    : { arq: H*0.06, def: H*0.20, med: null,    del: H*0.36 };
-  const yB = hasBMed
-    ? { arq: H*0.94, def: H*0.82, med: H*0.70, del: H*0.58 }
-    : { arq: H*0.94, def: H*0.80, med: null,    del: H*0.64 };
-
-  const rowX = (count) => {
-    if (count === 1) return [W/2];
-    if (count === 2) return [W*0.28, W*0.72];
-    if (count === 3) return [W*0.18, W/2, W*0.82];
-    return [W*0.15, W*0.38, W*0.62, W*0.85];
-  };
-
-  const Shirt = ({x, y, name, isGoalie, team}) => {
+  const ShirtEl = ({ pkey, isGoalie, team }) => {
+    const pos = positions[pkey] || {x:W/2,y:H/2};
     const isNegro = team==="negro";
-    // Arquero SIEMPRE amarillo (ambos equipos)
-    const shirtFill   = isGoalie ? "#f5c518"  : (isNegro?"#1a1a1a":"#f0f0f0");
-    const shirtStroke = isGoalie ? "#c9a000"  : (isNegro?"#444":"#bbb");
-    const badgeFill   = isGoalie ? "#c9a000"  : (isNegro?"#333":"#ddd");
-    const S = 20;
+    const shirtFill   = isGoalie?"#f5c518":(isNegro?"#1a1a1a":"#f0f0f0");
+    const shirtStroke = isGoalie?"#c9a000":(isNegro?"#444":"#bbb");
+    const badgeFill   = isGoalie?"#c9a000":(isNegro?"#333":"#ddd");
+    const S=20, isDragged=dragging?.key===pkey;
     return (
-      <g transform={`translate(${x},${y})`}>
-        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.1},${-S*0.45} L${-S*0.55},${-S*0.2} L${-S*0.55},${S*0.85} L${S*0.55},${S*0.85} L${S*0.55},${-S*0.2} L${S*1.1},${-S*0.45} L${S*0.75},${-S*0.95} Z`}
-          fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        <path d={`M${-S*0.75},${-S*0.95} L${-S*1.2},${-S*0.55} L${-S*1.1},${-S*0.45} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        <path d={`M${S*0.75},${-S*0.95} L${S*1.2},${-S*0.55} L${S*1.1},${-S*0.45} Z`}   fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
-        <path d={`M${-S*0.35},${-S*0.95} Q0,${-S*0.7} ${S*0.35},${-S*0.95}`} fill="none" stroke={shirtStroke} strokeWidth="2"/>
-        <circle cx="0" cy={S*0.1} r={S*0.28} fill={badgeFill} opacity="0.8"/>
+      <g transform={`translate(${pos.x},${pos.y})`}
+        style={{cursor:isAdmin?(isDragged?"grabbing":"grab"):"default",userSelect:"none"}}
+        onMouseDown={e=>{e.preventDefault();onDragStart(pkey,e.clientX,e.clientY);}}
+        onTouchStart={e=>{e.preventDefault();onDragStart(pkey,e.touches[0].clientX,e.touches[0].clientY);}}>
+        {isDragged&&<circle r={S*1.6} fill="rgba(255,255,255,0.15)" stroke="rgba(255,255,255,0.4)" strokeWidth="1.5"/>}
+        <path d={`M${-S*.75},${-S*.95} L${-S*1.1},${-S*.45} L${-S*.55},${-S*.2} L${-S*.55},${S*.85} L${S*.55},${S*.85} L${S*.55},${-S*.2} L${S*1.1},${-S*.45} L${S*.75},${-S*.95} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${-S*.75},${-S*.95} L${-S*1.2},${-S*.55} L${-S*1.1},${-S*.45} Z`} fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${S*.75},${-S*.95} L${S*1.2},${-S*.55} L${S*1.1},${-S*.45} Z`}   fill={shirtFill} stroke={shirtStroke} strokeWidth="1.5"/>
+        <path d={`M${-S*.35},${-S*.95} Q0,${-S*.7} ${S*.35},${-S*.95}`} fill="none" stroke={shirtStroke} strokeWidth="2"/>
+        <circle cx="0" cy={S*.1} r={S*.28} fill={badgeFill} opacity="0.8"/>
         <text x="0" y={S*1.38} textAnchor="middle" fontSize="11" fontWeight="900"
           fill="white" fontFamily="'Barlow Condensed',Arial,sans-serif"
           paintOrder="stroke" stroke="rgba(0,0,0,0.85)" strokeWidth="3" strokeLinejoin="round">
-          {(name||"?").toUpperCase()}
+          {(getName(pkey)||"?").toUpperCase()}
         </text>
       </g>
     );
   };
 
+  const allPlayers = [
+    ...negro.map(p  => ({key:`n_${p.id}`, isGoalie:p.role==="Arquero", team:"negro" })),
+    ...blanco.map(p => ({key:`b_${p.id}`, isGoalie:p.role==="Arquero", team:"blanco"})),
+  ];
+
   return (
-    <div className="pitch-wrapper">
+    <div className="pitch-wrapper"
+      onMouseMove={e=>onDragMove(e.clientX,e.clientY)}
+      onMouseUp={onDragEnd} onMouseLeave={onDragEnd}
+      onTouchMove={e=>{e.preventDefault();onDragMove(e.touches[0].clientX,e.touches[0].clientY);}}
+      onTouchEnd={onDragEnd}
+      style={{touchAction:isAdmin?"none":"auto"}}>
 
-      {/* Botón toggle edición — solo admins */}
       {isAdmin&&(<>
-        <button onClick={()=>{setEditMode(e=>!e);setEditingKey(null);}}
-          style={{width:"100%",padding:"8px",marginBottom:8,
-            background:editMode?"rgba(255,215,64,0.15)":"rgba(255,255,255,0.06)",
-            border:`1px solid ${editMode?"rgba(255,215,64,0.4)":"rgba(255,255,255,0.15)"}`,
-            borderRadius:8,color:editMode?"#ffd740":"#fff",
-            fontFamily:"Barlow Condensed,sans-serif",fontSize:14,fontWeight:700,letterSpacing:1,cursor:"pointer"}}>
-          ✏️ {editMode?"Cerrar edición de nombres":"Editar nombres en la imagen"}
-        </button>
+        <div style={{display:"flex",gap:8,marginBottom:8}}>
+          <button onClick={()=>{setEditMode(e=>!e);setEditingKey(null);}}
+            style={{flex:1,padding:"8px",background:editMode?"rgba(255,215,64,0.15)":"rgba(255,255,255,0.06)",
+              border:`1px solid ${editMode?"rgba(255,215,64,0.4)":"rgba(255,255,255,0.15)"}`,
+              borderRadius:8,color:editMode?"#ffd740":"#fff",fontFamily:"Barlow Condensed,sans-serif",
+              fontSize:13,fontWeight:700,cursor:"pointer"}}>
+            ✏️ {editMode?"Cerrar edición":"Editar nombres"}
+          </button>
+          <button onClick={()=>setPositions(initPositions())}
+            style={{padding:"8px 14px",background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.15)",
+              borderRadius:8,color:"var(--muted)",fontFamily:"Barlow Condensed,sans-serif",fontSize:16,fontWeight:700,cursor:"pointer"}}
+            title="Resetear posiciones">↺</button>
+        </div>
 
-        {/* Panel de edición */}
         {editMode&&(
-          <div style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,215,64,0.2)",
-            borderRadius:10,padding:"12px",marginBottom:10}}>
-            <div style={{fontFamily:"Barlow Condensed,sans-serif",fontSize:12,
-              color:"rgba(255,215,64,0.8)",letterSpacing:1,marginBottom:10,
-              textTransform:"uppercase",fontWeight:700}}>Tocá un nombre para editarlo</div>
+          <div style={{background:"rgba(255,255,255,0.04)",border:"1px solid rgba(255,215,64,0.2)",borderRadius:10,padding:"12px",marginBottom:10}}>
+            <div style={{fontFamily:"Barlow Condensed,sans-serif",fontSize:12,color:"rgba(255,215,64,0.8)",letterSpacing:1,marginBottom:10,textTransform:"uppercase",fontWeight:700}}>Tocá un nombre para editarlo</div>
             {["n","b"].map(prefix=>(
               <div key={prefix} style={{marginBottom:10}}>
-                <div style={{fontSize:11,color:"var(--muted)",fontFamily:"Barlow Condensed,sans-serif",
-                  fontWeight:700,letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>
+                <div style={{fontSize:11,color:"var(--muted)",fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,letterSpacing:1,marginBottom:6,textTransform:"uppercase"}}>
                   {prefix==="n"?"⬛ Negro":"⬜ Blanco"}
                 </div>
                 <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
                   {(prefix==="n"?negro:blanco).map(p=>{
                     const key=`${prefix}_${p.id}`;
-                    const isEditing=editingKey===key;
-                    return isEditing?(
+                    return editingKey===key?(
                       <div key={p.id} style={{display:"flex",gap:4,alignItems:"center"}}>
-                        <input autoFocus value={editVal}
-                          onChange={e=>setEditVal(e.target.value)}
+                        <input autoFocus value={editVal} onChange={e=>setEditVal(e.target.value)}
                           onKeyDown={e=>{if(e.key==="Enter")confirmEdit();if(e.key==="Escape")setEditingKey(null);}}
-                          style={{padding:"4px 8px",borderRadius:6,border:"1.5px solid var(--azul)",
-                            background:"var(--bg3)",color:"#fff",fontSize:13,
-                            fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,width:90,outline:"none"}}/>
-                        <button onClick={confirmEdit}
-                          style={{background:"var(--green)",color:"#000",border:"none",borderRadius:5,
-                            padding:"4px 8px",cursor:"pointer",fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✓</button>
-                        <button onClick={()=>setEditingKey(null)}
-                          style={{background:"var(--bg3)",color:"var(--muted)",border:"1px solid var(--border)",
-                            borderRadius:5,padding:"4px 8px",cursor:"pointer",
-                            fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✕</button>
+                          style={{padding:"4px 8px",borderRadius:6,border:"1.5px solid var(--azul)",background:"var(--bg3)",color:"#fff",fontSize:13,fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,width:90,outline:"none"}}/>
+                        <button onClick={confirmEdit} style={{background:"var(--green)",color:"#000",border:"none",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✓</button>
+                        <button onClick={()=>setEditingKey(null)} style={{background:"var(--bg3)",color:"var(--muted)",border:"1px solid var(--border)",borderRadius:5,padding:"4px 8px",cursor:"pointer",fontFamily:"Barlow Condensed,sans-serif",fontWeight:700,fontSize:12}}>✕</button>
                       </div>
                     ):(
-                      <button key={p.id} onClick={()=>startEdit(key,names[key]??p.name)}
-                        style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",
-                          background:"var(--bg3)",color:"#fff",cursor:"pointer",
-                          fontFamily:"Barlow Condensed,sans-serif",fontSize:13,fontWeight:700}}>
+                      <button key={p.id} onClick={()=>{setEditingKey(key);setEditVal(names[key]??p.name);}}
+                        style={{padding:"4px 10px",borderRadius:6,border:"1px solid var(--border)",background:"var(--bg3)",color:"#fff",cursor:"pointer",fontFamily:"Barlow Condensed,sans-serif",fontSize:13,fontWeight:700}}>
                         {names[key]??p.name}
                       </button>
                     );
@@ -556,54 +520,37 @@ function PitchSVG({ negro, blanco, fecha, isAdmin }) {
             ))}
           </div>
         )}
+        <div style={{fontSize:11,color:"var(--muted)",textAlign:"center",marginBottom:6,fontFamily:"Barlow Condensed,sans-serif"}}>
+          🖐️ Arrastrá las camisetas para moverlas
+        </div>
       </>)}
 
-      <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`}
-        xmlns="http://www.w3.org/2000/svg"
-        style={{display:"block", borderRadius:12, overflow:"hidden"}}>
-
-        {/* Césped */}
-        {[...Array(12)].map((_,i)=>
-          <rect key={i} x="0" y={i*(H/12)} width={W} height={H/12}
-            fill={i%2===0?"#2e7d32":"#276428"}/>
-        )}
-        {/* Líneas */}
+      <svg ref={svgRef} width="100%" viewBox={`0 0 ${W} ${H}`} xmlns="http://www.w3.org/2000/svg"
+        style={{display:"block",borderRadius:12,overflow:"hidden"}}>
+        {[...Array(12)].map((_,i)=><rect key={i} x="0" y={i*(H/12)} width={W} height={H/12} fill={i%2===0?"#2e7d32":"#276428"}/>)}
         <rect x="20" y="14" width={W-40} height={H-28} fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <line x1="20" y1={H/2} x2={W-20} y2={H/2} stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H/2} r="46" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H/2} r="3.5" fill="rgba(255,255,255,0.9)"/>
-        {/* Áreas arriba */}
         <rect x={W/2-62} y="14" width="124" height="80" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <rect x={W/2-32} y="14" width="64"  height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy="66" r="3" fill="rgba(255,255,255,0.9)"/>
         <rect x={W/2-26} y="6" width="52" height="12" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.95)" strokeWidth="2"/>
-        {/* Áreas abajo */}
         <rect x={W/2-62} y={H-94} width="124" height="80" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <rect x={W/2-32} y={H-48} width="64"  height="34" fill="none" stroke="rgba(255,255,255,0.8)" strokeWidth="2"/>
         <circle cx={W/2} cy={H-66} r="3" fill="rgba(255,255,255,0.9)"/>
         <rect x={W/2-26} y={H-18} width="52" height="12" fill="rgba(0,0,0,0.3)" stroke="rgba(255,255,255,0.95)" strokeWidth="2"/>
-        {/* Etiquetas */}
         <rect x="24" y="18" width="70" height="18" rx="3" fill="rgba(0,0,0,0.5)"/>
         <text x="59" y="31" textAnchor="middle" fontSize="11" fontWeight="900" fill="white" fontFamily="Barlow Condensed,sans-serif" letterSpacing="1">⬛ NEGRO</text>
         <rect x="24" y={H-36} width="76" height="18" rx="3" fill="rgba(0,0,0,0.5)"/>
         <text x="62" y={H-23} textAnchor="middle" fontSize="11" fontWeight="900" fill="white" fontFamily="Barlow Condensed,sans-serif" letterSpacing="1">⬜ BLANCO</text>
-
-        {/* ── NEGRO (arriba) ── */}
-        <Shirt x={W/2} y={yN.arq} name={getName(nL.arq,"n")} isGoalie={true} team="negro"/>
-        {nL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.defs.length)[i]} y={yN.def} name={getName(p,"n")} isGoalie={false} team="negro"/>)}
-        {nL.med&&<Shirt x={W/2} y={yN.med} name={getName(nL.med,"n")} isGoalie={false} team="negro"/>}
-        {nL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(nL.dels.length)[i]} y={yN.del} name={getName(p,"n")} isGoalie={false} team="negro"/>)}
-
-        {/* ── BLANCO (abajo) ── */}
-        <Shirt x={W/2} y={yB.arq} name={getName(bL.arq,"b")} isGoalie={true} team="blanco"/>
-        {bL.defs.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.defs.length)[i]} y={yB.def} name={getName(p,"b")} isGoalie={false} team="blanco"/>)}
-        {bL.med&&<Shirt x={W/2} y={yB.med} name={getName(bL.med,"b")} isGoalie={false} team="blanco"/>}
-        {bL.dels.map((p,i)=><Shirt key={p.id||i} x={rowX(bL.dels.length)[i]} y={yB.del} name={getName(p,"b")} isGoalie={false} team="blanco"/>)}
+        {allPlayers.map(({key,isGoalie,team})=><ShirtEl key={key} pkey={key} isGoalie={isGoalie} team={team}/>)}
       </svg>
       <button className="pitch-download-btn" onClick={downloadPitch}>⬇️ Descargar imagen</button>
     </div>
   );
 }
+
 
 // ─── APP ──────────────────────────────────────────────────────────────────────
 export default function App() {
@@ -696,12 +643,9 @@ export default function App() {
   // CAMBIO 2: sorteo inteligente pasa stats
   const generateOptions = async () => {
     if(selected.length!==12) return notify("Seleccioná exactamente 12 jugadores","error");
-    const selectedPlayers = players.filter(p => selected.includes(p.id));
-    const arqCount = selectedPlayers.filter(p => p.positions.includes("Arquero")).length;
-    if(arqCount < 2) notify(`⚠️ Solo hay ${arqCount} arquero(s) — se asignará uno de campo al arco`,"error");
     const opts = buildTwoOptions(selected, players, stats);
     await updateState({options:opts,votes:{},chosenOpt:null});
-    if(arqCount >= 2) notify("¡Dos opciones generadas!");
+    notify("¡Dos opciones generadas!");
     setTab("equipos");
   };
 
