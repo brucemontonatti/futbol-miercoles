@@ -103,32 +103,43 @@ function buildTwoOptions(selectedIds, players, stats) {
   const selected = players.filter(p => selectedIds.includes(p.id));
   if (selected.length < 12) return null;
 
-  // Separar arqueros del resto
-  const arqueros = selected.filter(p => p.positions[0] === "Arquero");
-  const noArqueros = selected.filter(p => p.positions[0] !== "Arquero");
+  // Separar arqueros: primero los que tienen Arquero como posición primaria,
+  // luego los que lo tienen como secundaria (ej: Bruce)
+  const arquerosPrimary   = selected.filter(p => p.positions[0] === "Arquero");
+  const arquerosSecondary = selected.filter(p => p.positions[0] !== "Arquero" && p.positions.includes("Arquero"));
+  const todosArqueros     = [...arquerosPrimary, ...arquerosSecondary];
+  const noArqueros        = selected.filter(p => !p.positions.includes("Arquero"));
 
-  // Ordenar no-arqueros por ranking (pts desc)
-  const ranked = [...noArqueros].sort((a,b) => pts(stats[b.id]||{}) - pts(stats[a.id]||{}));
+  // Garantizar al menos 2 arqueros: si hay menos, tomar jugadores de campo como arquero
+  let arqueros = [...todosArqueros];
+  const campoPool = [...noArqueros];
+  while (arqueros.length < 2 && campoPool.length > 0) {
+    arqueros.push(campoPool.shift());
+  }
+
+  // Jugadores de campo restantes (no arqueros)
+  const campoIds = new Set(arqueros.map(p => p.id));
+  const campo = selected.filter(p => !campoIds.has(p.id));
+
+  // Ordenar campo por ranking (pts desc)
+  const ranked = [...campo].sort((a,b) => pts(stats[b.id]||{}) - pts(stats[a.id]||{}));
 
   const makeBalancedTeams = () => {
     let negro = [], blanco = [];
 
-    // 1) Asignar UN arquero a cada equipo (shuffleados para variación)
+    // 1) Shuffle arqueros y asignar UNO a cada equipo — garantizado
     const shuffledArqs = shuffle(arqueros);
-    const arqNegro = shuffledArqs[0];
-    const arqBlanco = shuffledArqs[1];
-    // Si hay más de 2 arqueros, agregarlos como jugadores de campo con su posición secundaria
+    negro.push({ ...shuffledArqs[0], role: "Arquero" });
+    blanco.push({ ...shuffledArqs[1], role: "Arquero" });
+
+    // Si hay más de 2 arqueros, van al campo con posición secundaria
     const extraArqs = shuffledArqs.slice(2).map(p => ({
       ...p,
-      role: p.positions[1] || "Defensor"
+      role: p.positions.find(pos => pos !== "Arquero") || "Defensor"
     }));
 
-    negro.push({ ...arqNegro, role: "Arquero" });
-    blanco.push({ ...arqBlanco, role: "Arquero" });
-
-    // 2) Snake draft con los no-arqueros (+ arqueros extra si hubiera)
+    // 2) Snake draft con jugadores de campo + arqueros extra
     const pool = [...ranked, ...extraArqs];
-    // Pequeño shuffle dentro de grupos de 2 para variación
     const shuffledPool = [...pool];
     for(let i=0;i<shuffledPool.length;i+=2){
       if(Math.random()<0.4 && shuffledPool[i+1]){
@@ -673,9 +684,12 @@ export default function App() {
   // CAMBIO 2: sorteo inteligente pasa stats
   const generateOptions = async () => {
     if(selected.length!==12) return notify("Seleccioná exactamente 12 jugadores","error");
+    const selectedPlayers = players.filter(p => selected.includes(p.id));
+    const arqCount = selectedPlayers.filter(p => p.positions.includes("Arquero")).length;
+    if(arqCount < 2) notify(`⚠️ Solo hay ${arqCount} arquero(s) — se asignará uno de campo al arco`,"error");
     const opts = buildTwoOptions(selected, players, stats);
     await updateState({options:opts,votes:{},chosenOpt:null});
-    notify("¡Dos opciones generadas!");
+    if(arqCount >= 2) notify("¡Dos opciones generadas!");
     setTab("equipos");
   };
 
