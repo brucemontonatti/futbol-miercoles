@@ -153,13 +153,19 @@ function buildTwoOptions(selectedIds, players, stats) {
     return an.length === 1 && ab.length === 1 && an[0] !== ab[0];
   };
 
-  let opt1 = makeBalancedTeams(), a1 = 0;
-  while (!arqsSeparados(opt1) && a1++ < 30) opt1 = makeBalancedTeams();
+  // opt1: reintentar hasta tener arqueros separados (sin limite practico)
+  let opt1 = makeBalancedTeams();
+  for (let i = 0; i < 100 && !arqsSeparados(opt1); i++) opt1 = makeBalancedTeams();
 
-  let opt2 = makeBalancedTeams(), a2 = 0;
-  while (a2++ < 30 && (!arqsSeparados(opt2) ||
-    JSON.stringify(opt1.negro.map(p=>p.id).sort()) === JSON.stringify(opt2.negro.map(p=>p.id).sort()))
-  ) opt2 = makeBalancedTeams();
+  // opt2: primero garantizar arqueros separados, despues intentar que sea distinto a opt1
+  let opt2 = makeBalancedTeams();
+  for (let i = 0; i < 100 && !arqsSeparados(opt2); i++) opt2 = makeBalancedTeams();
+  // Intentar ademas que los equipos sean distintos (pero sin sacrificar arqueros separados)
+  for (let i = 0; i < 50; i++) {
+    if (JSON.stringify(opt1.negro.map(p=>p.id).sort()) !== JSON.stringify(opt2.negro.map(p=>p.id).sort())) break;
+    const candidate = makeBalancedTeams();
+    if (arqsSeparados(candidate)) opt2 = candidate;
+  }
 
   return { azul: opt1, naranja: opt2 };
 }
