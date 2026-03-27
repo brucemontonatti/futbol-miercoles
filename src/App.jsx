@@ -162,11 +162,23 @@ function buildTwoOptions(selectedIds, players, stats) {
     return { negro: negro.slice(0,6), blanco: blanco.slice(0,6) };
   };
 
-  const opt1 = makeBalancedTeams();
-  let opt2 = makeBalancedTeams(), attempts=0;
-  while(attempts<15 && JSON.stringify(opt1.negro.map(p=>p.id).sort())===JSON.stringify(opt2.negro.map(p=>p.id).sort())){
-    opt2=makeBalancedTeams(); attempts++;
-  }
+  const arqsSeparados = (opt) => {
+    const arqsNegro  = opt.negro.filter(p => p.role === "Arquero").map(p => p.id);
+    const arqsBlanco = opt.blanco.filter(p => p.role === "Arquero").map(p => p.id);
+    // Verificar que no haya arqueros repetidos en el mismo equipo
+    return arqsNegro.length === 1 && arqsBlanco.length === 1 && arqsNegro[0] !== arqsBlanco[0];
+  };
+
+  let opt1 = makeBalancedTeams(), att1 = 0;
+  while (!arqsSeparados(opt1) && att1++ < 20) opt1 = makeBalancedTeams();
+
+  let opt2 = makeBalancedTeams(), att2 = 0;
+  while (
+    (att2++ < 20) &&
+    (!arqsSeparados(opt2) ||
+     JSON.stringify(opt1.negro.map(p=>p.id).sort()) === JSON.stringify(opt2.negro.map(p=>p.id).sort()))
+  ) { opt2 = makeBalancedTeams(); }
+
   return { azul:opt1, naranja:opt2 };
 }
 
